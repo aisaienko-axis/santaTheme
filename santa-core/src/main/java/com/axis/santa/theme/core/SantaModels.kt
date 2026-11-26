@@ -9,9 +9,16 @@ data class SantaRect(
     fun contains(x: Float, y: Float): Boolean = x >= left && x < right && y >= top && y < bottom
 }
 
+enum class SantaAsset {
+    Seat,
+    Dance,
+}
+
 data class SantaScenario(
     val compWidth: Float = 520f,
     val compHeight: Float = 1000f,
+    val danceCompWidth: Float = 1040f,
+    val danceCompHeight: Float = 560f,
     val seatX: Float = 300f,
     val seatY: Float = 380f,
     val santaHeight: Float = 207f,
@@ -42,4 +49,6 @@ data class SantaFrame(
     val playId: Int,
     val cancelId: Int,
     val interactive: Boolean,
+    val durationMs: Long = 0L,
+    val asset: SantaAsset = SantaAsset.Seat,
 )

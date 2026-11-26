@@ -10,6 +10,10 @@ import android.view.View
 import android.widget.FrameLayout
 import androidx.core.view.isVisible
 import com.airbnb.lottie.LottieAnimationView
+import com.airbnb.lottie.LottieComposition
+import com.airbnb.lottie.LottieCompositionFactory
+import com.axis.santa.theme.core.R
+import com.axis.santa.theme.core.SantaAsset
 import com.axis.santa.theme.core.SantaFrame
 import com.axis.santa.theme.core.SantaPlayer
 
@@ -17,13 +21,21 @@ class SantaController(
     private val santa: LottieAnimationView,
     private val button: View,
     private val overlay: FrameLayout,
+    size: Float = 0.5f,
+    animationDurationMs: Long = 0L,
     returnDelayMs: Long = 2500,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private var ignoreEnd = false
     private var playId = 0
     private var cancelId = 0
+    private var shownAsset: SantaAsset? = null
+    private var lastFrame: SantaFrame? = null
+    private var seatComposition: LottieComposition? = null
+    private var danceComposition: LottieComposition? = null
     private val player = SantaPlayer(
+        size = size,
+        animationDurationMs = animationDurationMs,
         returnDelayMs = returnDelayMs,
         schedule = { delayMs, block -> main.postDelayed(block, delayMs) },
         cancelScheduled = { main.removeCallbacksAndMessages(null) },
@@ -38,9 +50,18 @@ class SantaController(
             }
         }
     }
-    private val onFrame: (SantaFrame) -> Unit = { frame ->
+    private val onFrame: (SantaFrame) -> Unit = onFrame@{ frame ->
+        lastFrame = frame
         overlay.isVisible = frame.visible
-        santa.speed = frame.speed
+        val composition = compositionFor(frame.asset) ?: return@onFrame
+        if (frame.asset != shownAsset) {
+            ignoreEnd = true
+            santa.setComposition(composition)
+            ignoreEnd = false
+            shownAsset = frame.asset
+            place()
+        }
+        santa.speed = speedFor(frame)
         if (frame.cancelId != cancelId) {
             cancelId = frame.cancelId
             ignoreEnd = true
@@ -52,6 +73,7 @@ class SantaController(
             syncMarkers()
             santa.setMinAndMaxFrame(frame.marker)
             santa.playAnimation()
+            santa.speed = speedFor(frame)
         }
     }
 
@@ -60,6 +82,14 @@ class SantaController(
         santa.addAnimatorListener(animatorListener)
         player.addListener(onFrame)
         installTouch()
+        load(R.raw.anim_santa) { composition ->
+            seatComposition = composition
+            lastFrame?.let(onFrame)
+        }
+        load(R.raw.anim_santa_dance) { composition ->
+            danceComposition = composition
+            lastFrame?.let(onFrame)
+        }
         button.post {
             syncMarkers()
             place()
@@ -68,9 +98,24 @@ class SantaController(
         button.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> place() }
     }
 
-    fun onStartPressed() {
+    fun setSize(size: Float) {
+        player.setSize(size)
+        place()
+    }
+
+    fun setAnimationDuration(durationMs: Long) {
+        player.setAnimationDuration(durationMs)
+    }
+
+    fun stop() {
+        ignoreEnd = true
+        player.stop()
+        ignoreEnd = false
+    }
+
+    fun onStartPressed(onFinished: (() -> Unit)? = null): Boolean {
         syncMarkers()
-        player.onStartPressed()
+        return player.onStartPressed(onFinished)
     }
 
     fun setScreenActive(active: Boolean) {
@@ -104,8 +149,27 @@ class SantaController(
         santa.y = placement.y
     }
 
+    private fun load(rawRes: Int, onLoaded: (LottieComposition) -> Unit) {
+        LottieCompositionFactory.fromRawRes(santa.context, rawRes)
+            .addFailureListener { }
+            .addListener { composition -> main.post { onLoaded(composition) } }
+    }
+
+    private fun compositionFor(asset: SantaAsset): LottieComposition? {
+        return if (asset == SantaAsset.Dance) danceComposition else seatComposition
+    }
+
+    private fun speedFor(frame: SantaFrame): Float {
+        if (frame.durationMs <= 0L) return frame.speed
+        val composition = santa.composition ?: return frame.speed
+        val marker = composition.getMarker(frame.marker) ?: return frame.speed
+        val nativeMs = marker.durationFrames / composition.frameRate * 1000f
+        if (nativeMs <= 0f) return frame.speed
+        return nativeMs / frame.durationMs
+    }
+
     private fun syncMarkers() {
-        val composition = santa.composition ?: return
+        val composition = seatComposition ?: return
         player.markers(
             listOf("idle", "idle_blink", "idle_wave", "fall", "show", "return")
                 .filter { composition.getMarker(it) != null }

@@ -22,8 +22,10 @@ import androidx.compose.ui.unit.IntOffset
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.rememberLottieComposition
+import com.airbnb.lottie.LottieComposition
 import com.axis.santa.theme.core.R
 import com.axis.santa.theme.core.SantaAnchor
+import com.axis.santa.theme.core.SantaAsset
 import com.axis.santa.theme.core.SantaFrame
 import com.axis.santa.theme.core.SantaPlayer
 import kotlin.coroutines.coroutineContext
@@ -34,11 +36,17 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
-fun rememberSantaPlayer(returnDelayMs: Long = 2500): SantaPlayer {
+fun rememberSantaPlayer(
+    size: Float = 0.5f,
+    animationDurationMs: Long = 0L,
+    returnDelayMs: Long = 2500,
+): SantaPlayer {
     val scope = rememberCoroutineScope()
     val player = remember {
         var delayJob: Job? = null
         SantaPlayer(
+            size = size,
+            animationDurationMs = animationDurationMs,
             returnDelayMs = returnDelayMs,
             schedule = { delayMs, block ->
                 delayJob?.cancel()
@@ -50,6 +58,8 @@ fun rememberSantaPlayer(returnDelayMs: Long = 2500): SantaPlayer {
             cancelScheduled = { delayJob?.cancel() },
         )
     }
+    player.setSize(size)
+    player.setAnimationDuration(animationDurationMs)
     DisposableEffect(player) {
         onDispose { player.release() }
     }
@@ -61,12 +71,21 @@ fun SantaOverlay(
     player: SantaPlayer,
     anchorInOverlay: SantaAnchor,
     modifier: Modifier = Modifier,
+    size: Float = player.size,
+    animationDurationMs: Long = player.animationDurationMs,
 ) {
-    val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.anim_santa))
+    player.setSize(size)
+    player.setAnimationDuration(animationDurationMs)
+    val seatComposition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.anim_santa))
+    val danceComposition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.anim_santa_dance))
     var frame by remember { mutableStateOf(player.frame) }
     var progress by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
-    val playback = remember(player, composition) { Playback() }
+    val playback = remember(player) { Playback() }
+    val compositions = remember(player) { CompositionHolder() }
+    compositions.seat = seatComposition
+    compositions.dance = danceComposition
+    val shown = if (frame.asset == SantaAsset.Dance) danceComposition else seatComposition
     val placement = player.place(
         buttonLeft = anchorInOverlay.leftPx,
         buttonTop = anchorInOverlay.topPx,
@@ -74,36 +93,47 @@ fun SantaOverlay(
         buttonHeight = anchorInOverlay.heightPx,
     )
 
-    DisposableEffect(player, composition) {
-        val listener: (SantaFrame) -> Unit = { next ->
+    val listener = remember(player) {
+        { next: SantaFrame ->
             frame = next
+            val loaded = if (next.asset == SantaAsset.Dance) compositions.dance else compositions.seat
             if (next.cancelId != playback.cancelId) {
                 playback.cancelId = next.cancelId
                 playback.job?.cancel()
                 playback.job = null
             }
             if (next.playId != playback.playId && next.playId != 0) {
-                playback.playId = next.playId
-                playback.job?.cancel()
-                val loaded = composition
                 if (loaded != null) {
+                    playback.playId = next.playId
+                    playback.job?.cancel()
+                    val marker = loaded.getMarker(next.marker)
+                    if (marker != null && loaded.durationFrames > 0f) {
+                        progress = marker.startFrame / loaded.durationFrames
+                    }
                     playback.job = scope.launch {
-                        runSegment(loaded, next.marker, player) { progress = it }
+                        runSegment(loaded, next.marker, next.durationMs, player) { progress = it }
                         if (isActive) player.onSegmentEnded()
                     }
                 }
             }
         }
+    }
+
+    DisposableEffect(player) {
         player.addListener(listener)
-        if (composition != null && player.frame.playId != 0) listener(player.frame)
+        listener(player.frame)
         onDispose {
             player.removeListener(listener)
             playback.job?.cancel()
         }
     }
 
-    LaunchedEffect(composition) {
-        val loaded = composition ?: return@LaunchedEffect
+    LaunchedEffect(seatComposition, danceComposition) {
+        listener(player.frame)
+    }
+
+    LaunchedEffect(seatComposition) {
+        val loaded = seatComposition ?: return@LaunchedEffect
         player.markers(loaded.markers.map { it.name }.toSet())
         if (!playback.attached) {
             playback.attached = true
@@ -111,11 +141,11 @@ fun SantaOverlay(
         }
     }
 
-    if (placement == null || !frame.visible) return
+    if (placement == null || !frame.visible || shown == null) return
     val density = LocalDensity.current
     Box(modifier) {
         LottieAnimation(
-            composition = composition,
+            composition = shown,
             progress = { progress },
             contentScale = ContentScale.FillBounds,
             modifier = Modifier
@@ -146,6 +176,11 @@ fun SantaOverlay(
     }
 }
 
+private class CompositionHolder {
+    var seat: LottieComposition? = null
+    var dance: LottieComposition? = null
+}
+
 private class Playback {
     var playId = 0
     var cancelId = 0
@@ -156,6 +191,7 @@ private class Playback {
 private suspend fun runSegment(
     composition: com.airbnb.lottie.LottieComposition,
     markerName: String,
+    durationMs: Long,
     player: SantaPlayer,
     onProgress: (Float) -> Unit,
 ) {
@@ -163,6 +199,8 @@ private suspend fun runSegment(
     val duration = composition.durationFrames
     if (duration <= 0f) return
     val end = marker.startFrame + marker.durationFrames
+    val nativeMs = marker.durationFrames / composition.frameRate * 1000f
+    val fixedSpeed = if (durationMs > 0L && nativeMs > 0f) nativeMs / durationMs else 0f
     var current = marker.startFrame
     var lastNanos = 0L
     onProgress(current / duration)
@@ -174,7 +212,7 @@ private suspend fun runSegment(
             }
             val dt = (now - lastNanos) / 1_000_000_000f
             lastNanos = now
-            val speed = player.frame.speed.coerceAtLeast(0f)
+            val speed = if (fixedSpeed > 0f) fixedSpeed else player.frame.speed.coerceAtLeast(0f)
             current = (current + speed * composition.frameRate * dt).coerceAtMost(end)
             onProgress(current / duration)
         }
