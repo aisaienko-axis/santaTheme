@@ -1,0 +1,6 @@
+rootProject.name = "santa"
+include ":santa-core"
+include ":santa"
+include ":santa-compose"
+include ":app"
+include ":app-compose"
