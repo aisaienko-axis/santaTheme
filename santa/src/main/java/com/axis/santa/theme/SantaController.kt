@@ -14,6 +14,7 @@ import com.airbnb.lottie.LottieComposition
 import com.airbnb.lottie.LottieCompositionFactory
 import com.axis.santa.theme.core.R
 import com.axis.santa.theme.core.SantaAsset
+import com.axis.santa.theme.core.SantaAudio
 import com.axis.santa.theme.core.SantaFrame
 import com.axis.santa.theme.core.SantaPlayer
 
@@ -33,6 +34,7 @@ class SantaController(
     private var lastFrame: SantaFrame? = null
     private var seatComposition: LottieComposition? = null
     private var danceComposition: LottieComposition? = null
+    private val audio = SantaAudio(santa.context)
     private val player = SantaPlayer(
         size = size,
         animationDurationMs = animationDurationMs,
@@ -66,6 +68,7 @@ class SantaController(
             cancelId = frame.cancelId
             ignoreEnd = true
             santa.cancelAnimation()
+            audio.stop()
             ignoreEnd = false
         }
         if (frame.playId != playId) {
@@ -74,6 +77,7 @@ class SantaController(
             santa.setMinAndMaxFrame(frame.marker)
             santa.playAnimation()
             santa.speed = speedFor(frame)
+            audio.onMarker(frame.marker)
         }
     }
 
@@ -129,6 +133,7 @@ class SantaController(
         player.removeListener(onFrame)
         ignoreEnd = true
         player.release()
+        audio.stop()
         santa.cancelAnimation()
     }
 

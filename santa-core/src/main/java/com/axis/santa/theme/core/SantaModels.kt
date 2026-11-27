@@ -20,7 +20,7 @@ data class SantaScenario(
     val danceCompWidth: Float = 1040f,
     val danceCompHeight: Float = 560f,
     val seatX: Float = 300f,
-    val seatY: Float = 380f,
+    val seatY: Float = 371f,
     val santaHeight: Float = 207f,
     val size: Float = 0.5f,
     val hit: SantaRect = SantaRect(235f, 205f, 375f, 465f),

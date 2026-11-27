@@ -17,6 +17,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import com.airbnb.lottie.compose.LottieAnimation
@@ -26,6 +27,7 @@ import com.airbnb.lottie.LottieComposition
 import com.axis.santa.theme.core.R
 import com.axis.santa.theme.core.SantaAnchor
 import com.axis.santa.theme.core.SantaAsset
+import com.axis.santa.theme.core.SantaAudio
 import com.axis.santa.theme.core.SantaFrame
 import com.axis.santa.theme.core.SantaPlayer
 import kotlin.coroutines.coroutineContext
@@ -81,6 +83,8 @@ fun SantaOverlay(
     var frame by remember { mutableStateOf(player.frame) }
     var progress by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val audio = remember(player) { SantaAudio(context) }
     val playback = remember(player) { Playback() }
     val compositions = remember(player) { CompositionHolder() }
     compositions.seat = seatComposition
@@ -101,11 +105,13 @@ fun SantaOverlay(
                 playback.cancelId = next.cancelId
                 playback.job?.cancel()
                 playback.job = null
+                audio.stop()
             }
             if (next.playId != playback.playId && next.playId != 0) {
                 if (loaded != null) {
                     playback.playId = next.playId
                     playback.job?.cancel()
+                    audio.onMarker(next.marker)
                     val marker = loaded.getMarker(next.marker)
                     if (marker != null && loaded.durationFrames > 0f) {
                         progress = marker.startFrame / loaded.durationFrames
@@ -125,6 +131,7 @@ fun SantaOverlay(
         onDispose {
             player.removeListener(listener)
             playback.job?.cancel()
+            audio.stop()
         }
     }
 
